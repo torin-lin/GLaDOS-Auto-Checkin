@@ -28,17 +28,12 @@ def push_dingtalk(webhook_url: str, secret: str, title: str, content: str):
     if not webhook_url:
         return
 
-    # 钉钉消息格式
-    text = f"{title}\n\n{content}"
-    
-    # 钉钉单条消息有长度限制，做截断
-    if len(text) > 2000:
-        text = text[:1990] + "..."
-
+   # 使用Markdown格式，钉钉支持部分markdown语法
     data = {
-        "msgtype": "text",
-        "text": {
-            "content": text
+        "msgtype": "markdown",
+        "markdown": {
+            "title": title,
+            "text": f"## {title}\n\n{content.replace('|', ' | ')}"
         },
         "at": {
             "isAtAll": False
