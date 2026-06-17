@@ -23,39 +23,72 @@ PAYLOAD = {"token": "glados.cloud"}
 TIMEOUT = 10
 
 
-def push_telegram(bot_token: str, chat_id: str, title: str, content: str):
-    """推送消息到 Telegram Bot"""
-    if not bot_token or not chat_id:
+def push_dingtalk(webhook_url: str, secret: str, title: str, content: str):
+    """推送消息到钉钉机器人"""
+    if not webhook_url:
         return
 
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    # 钉钉消息格式
     text = f"{title}\n\n{content}"
-
-    # Telegram 单条消息上限 4096 字符，做截断避免发送失败。
-    if len(text) > 4000:
-        text = text[:3990] + "..."
+    
+    # 钉钉单条消息有长度限制，做截断
+    if len(text) > 2000:
+        text = text[:1990] + "..."
 
     data = {
-        "chat_id": chat_id,
-        "text": text,
+        "msgtype": "text",
+        "text": {
+            "content": text
+        },
+        "at": {
+            "isAtAll": False
+        }
     }
 
-    try:
-        resp = requests.post(url, json=data, timeout=TIMEOUT)
-        if resp.status_code == 200 and safe_json(resp).get("ok"):
-            print("✅ Telegram 推送成功")
+    # 如果配置了加签秘钥，进行签名
+    if secret:
+        timestamp = str(round(time.time() * 1000))
+        secret_enc = secret.encode('utf-8')
+        string_to_sign = f"{timestamp}\n{secret}"
+        string_to_sign_enc = string_to_sign.encode('utf-8')
+        
+        import hmac
+        import hashlib
+        import base64
+        
+        hmac_code = hmac.new(
+            secret_enc, 
+            string_to_sign_enc, 
+            digestmod=hashlib.sha256
+        ).digest()
+        sign = base64.b64encode(hmac_code).decode('utf-8')
+        
+        # 拼接完整的webhook地址
+        if '?' in webhook_url:
+            webhook_url = f"{webhook_url}&timestamp={timestamp}&sign={sign}"
         else:
-            print(f"⚠️ Telegram 推送失败: HTTP {resp.status_code} | {resp.text}")
+            webhook_url = f"{webhook_url}?timestamp={timestamp}&sign={sign}"
+
+    try:
+        resp = requests.post(webhook_url, json=data, timeout=TIMEOUT)
+        if resp.status_code == 200:
+            j = safe_json(resp)
+            if j.get("errcode") == 0:
+                print("✅ 钉钉推送成功")
+            else:
+                print(f"⚠️ 钉钉推送失败: {j.get('errmsg', '未知错误')}")
+        else:
+            print(f"⚠️ 钉钉推送失败: HTTP {resp.status_code} | {resp.text}")
     except Exception as e:
-        print(f"⚠️ Telegram 推送异常: {e}")
+        print(f"⚠️ 钉钉推送异常: {e}")
 
 
-def push_all(bot_token: str, chat_id: str, title: str, content: str):
-    """推送到 Telegram（如果已配置）"""
-    if bot_token and chat_id:
-        push_telegram(bot_token, chat_id, title, content)
+def push_all(webhook_url: str, secret: str, title: str, content: str):
+    """推送到钉钉（如果已配置）"""
+    if webhook_url:
+        push_dingtalk(webhook_url, secret, title, content)
     else:
-        print("⚠️ 未配置 Telegram 推送，请在 Secrets 中配置 TG_BOT_TOKEN 和 TG_CHAT_ID")
+        print("⚠️ 未配置钉钉推送，请在 Secrets 中配置 DINGTALK_WEBHOOK_URL")
 
 
 def safe_json(resp):
@@ -66,13 +99,14 @@ def safe_json(resp):
 
 
 def main():
-    bot_token = os.getenv("TG_BOT_TOKEN", "")
-    chat_id = os.getenv("TG_CHAT_ID", "")
+    # 从环境变量读取配置
+    webhook_url = os.getenv("DINGTALK_WEBHOOK_URL", "")
+    secret = os.getenv("DINGTALK_SECRET", "")  # 加签秘钥，可选
     cookies_env = os.getenv("COOKIES", "")
     cookies = [c.strip() for c in cookies_env.split("&") if c.strip()]
 
     if not cookies:
-        push_all(bot_token, chat_id, "GLaDOS 签到", "❌ 未检测到 COOKIES")
+        push_all(webhook_url, secret, "GLaDOS 签到", "❌ 未检测到 COOKIES")
         return
 
     session = requests.Session()
@@ -129,8 +163,9 @@ def main():
 
     print(content)
     
-    push_all(bot_token, chat_id, title, content)
+    push_all(webhook_url, secret, title, content)
 
 
 if __name__ == "__main__":
     main()
+    
